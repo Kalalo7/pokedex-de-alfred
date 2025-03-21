@@ -275,14 +275,17 @@ const Pokedex = () => {
     return movesWithSpanishNames.sort((a, b) => a.level - b.level);
   }, [moveFilter]);
 
+  // Modificar la función searchPokemon para usar un proxy CORS
   const searchPokemon = async () => {
     try {
       setError('');
-      // Añadir manejo de errores más detallado
       console.log(`Buscando Pokémon: ${search.toLowerCase()}`);
       
-      // Usar https explícitamente y añadir manejo de errores
-      const response = await axios.get(`https://pokeapi.co/api/v2/pokemon/${search.toLowerCase()}`)
+      // Usar un proxy CORS para evitar el error 403
+      const corsProxy = 'https://corsproxy.io/?';
+      const pokemonUrl = `https://pokeapi.co/api/v2/pokemon/${search.toLowerCase()}`;
+      
+      const response = await axios.get(`${corsProxy}${encodeURIComponent(pokemonUrl)}`)
         .catch(error => {
           console.error("Error en la búsqueda del Pokémon:", error);
           throw new Error(`No se pudo encontrar el Pokémon: ${error.message}`);
@@ -290,13 +293,15 @@ const Pokedex = () => {
       
       console.log("Datos del Pokémon recibidos:", response.data.name);
       
-      const speciesResponse = await axios.get(response.data.species.url)
+      const speciesUrl = response.data.species.url;
+      const speciesResponse = await axios.get(`${corsProxy}${encodeURIComponent(speciesUrl)}`)
         .catch(error => {
           console.error("Error al obtener datos de especie:", error);
           throw new Error(`No se pudieron obtener datos de especie: ${error.message}`);
         });
       
-      const evolutionResponse = await axios.get(speciesResponse.data.evolution_chain.url)
+      const evolutionUrl = speciesResponse.data.evolution_chain.url;
+      const evolutionResponse = await axios.get(`${corsProxy}${encodeURIComponent(evolutionUrl)}`)
         .catch(error => {
           console.error("Error al obtener cadena evolutiva:", error);
           throw new Error(`No se pudo obtener la cadena evolutiva: ${error.message}`);
@@ -306,9 +311,37 @@ const Pokedex = () => {
         name => name.language.name === 'es'
       )?.name || response.data.name;
 
+      // Modificar la función getSpanishType para usar el proxy CORS
       const getSpanishType = async (typeUrl) => {
-        const typeResponse = await axios.get(typeUrl);
+        const corsProxy = 'https://corsproxy.io/?';
+        const typeResponse = await axios.get(`${corsProxy}${encodeURIComponent(typeUrl)}`);
         return typeResponse.data.names.find(name => name.language.name === 'es')?.name;
+      };
+      
+      // Modificar la función getSpanishMoveName para usar el proxy CORS
+      const getSpanishMoveName = async (moveUrl) => {
+        try {
+          const corsProxy = 'https://corsproxy.io/?';
+          const moveResponse = await axios.get(`${corsProxy}${encodeURIComponent(moveUrl)}`);
+          const spanishName = moveResponse.data.names.find(
+            name => name.language.name === 'es'
+          )?.name || null;
+          
+          // Obtener la descripción en español
+          const spanishDescription = moveResponse.data.flavor_text_entries.find(
+            entry => entry.language.name === 'es'
+          )?.flavor_text || null;
+          
+          return {
+            name: spanishName,
+            description: spanishDescription,
+            power: moveResponse.data.power,
+            accuracy: moveResponse.data.accuracy,
+            type: moveResponse.data.type.name
+          };
+        } catch (error) {
+          return { name: null, description: null, power: null, accuracy: null, type: null };
+        }
       };
 
       const types = await Promise.all(
