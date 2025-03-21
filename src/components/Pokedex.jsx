@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import axios from 'axios';
 import styled from 'styled-components';
 
@@ -195,33 +195,85 @@ const Pokedex = () => {
   const [error, setError] = useState('');
   const [selectedGeneration, setSelectedGeneration] = useState('1');
   const [moveFilter, setMoveFilter] = useState('level-up');
-  
-  // Modify the getGenerationMoves function
-  const getGenerationMoves = (moves, generation) => {
-    return moves.filter(move => {
+  const [moves, setMoves] = useState([]);
+
+  // Helper functions
+  const getEvolutionDetails = (chain) => {
+    const evolutions = [];
+    let current = chain;
+    while (current) {
+      evolutions.push({
+        name: current.species.name,
+        min_level: current.evolution_details[0]?.min_level || null
+      });
+      current = current.evolves_to[0];
+    }
+    return evolutions;
+  };
+
+  // Modificar esta función para obtener más datos del movimiento
+  const getSpanishMoveName = async (moveUrl) => {
+    try {
+      const moveResponse = await axios.get(moveUrl);
+      const spanishName = moveResponse.data.names.find(
+        name => name.language.name === 'es'
+      )?.name || null;
+      
+      // Obtener la descripción en español
+      const spanishDescription = moveResponse.data.flavor_text_entries.find(
+        entry => entry.language.name === 'es'
+      )?.flavor_text || null;
+      
+      return {
+        name: spanishName,
+        description: spanishDescription,
+        power: moveResponse.data.power,
+        accuracy: moveResponse.data.accuracy,
+        type: moveResponse.data.type.name
+      };
+    } catch (error) {
+      return { name: null, description: null, power: null, accuracy: null, type: null };
+    }
+  };
+
+  const getGenerationMoves = useCallback(async (moves, generation) => {
+    const filteredMoves = moves.filter(move => {
       const versionGroup = move.version_group_details.find(detail => {
-        if (moveFilter !== 'all' && detail.move_learn_method.name !== moveFilter) {
-          return false;
-        }
-        switch(generation) {
-          case '1': return detail.version_group.name === 'red-blue';
-          case '2': return detail.version_group.name === 'gold-silver';
-          case '3': return detail.version_group.name === 'ruby-sapphire';
-          case '4': return detail.version_group.name === 'diamond-pearl';
-          case '5': return detail.version_group.name === 'black-white';
-          case '6': return detail.version_group.name === 'x-y';
-          case '7': return detail.version_group.name === 'sun-moon';
-          case '8': return detail.version_group.name === 'sword-shield';
-          default: return false;
-        }
+        if (moveFilter !== 'all' && detail.move_learn_method.name !== moveFilter) return false;
+        const versionMap = {
+          '1': 'red-blue',
+          '2': 'gold-silver',
+          '3': 'ruby-sapphire',
+          '4': 'diamond-pearl',
+          '5': 'black-white',
+          '6': 'x-y',
+          '7': 'sun-moon',
+          '8': 'sword-shield'
+        };
+        return detail.version_group.name === versionMap[generation];
       });
       return versionGroup !== undefined;
-    }).map(move => ({
-      name: move.move.name,
-      level: move.version_group_details[0]?.level_learned_at || 1,
-      method: move.version_group_details[0]?.move_learn_method.name
-    })).sort((a, b) => a.level - b.level);
-  };
+    });
+
+    // Obtener nombres y descripciones en español para cada movimiento
+    const movesWithSpanishNames = await Promise.all(
+      filteredMoves.map(async move => {
+        const spanishData = await getSpanishMoveName(move.move.url);
+        return {
+          name: move.move.name,
+          spanishName: spanishData.name,
+          description: spanishData.description,
+          power: spanishData.power,
+          accuracy: spanishData.accuracy,
+          type: spanishData.type,
+          level: move.version_group_details[0]?.level_learned_at || 1,
+          method: move.version_group_details[0]?.move_learn_method.name
+        };
+      })
+    );
+
+    return movesWithSpanishNames.sort((a, b) => a.level - b.level);
+  }, [moveFilter]);
 
   const searchPokemon = async () => {
     try {
@@ -230,46 +282,51 @@ const Pokedex = () => {
       const speciesResponse = await axios.get(response.data.species.url);
       const evolutionResponse = await axios.get(speciesResponse.data.evolution_chain.url);
       
-      const getEvolutionDetails = (chain) => {
-        const evolutions = [];
-        let current = chain;
-        
-        while (current) {
-          evolutions.push({
-            name: current.species.name,
-            min_level: current.evolution_details[0]?.min_level || null
-          });
-          current = current.evolves_to[0];
-        }
-        return evolutions;
+      const spanishName = speciesResponse.data.names.find(
+        name => name.language.name === 'es'
+      )?.name || response.data.name;
+
+      const getSpanishType = async (typeUrl) => {
+        const typeResponse = await axios.get(typeUrl);
+        return typeResponse.data.names.find(name => name.language.name === 'es')?.name;
       };
 
-      const pokemon = {
+      const types = await Promise.all(
+        response.data.types.map(async (type) => ({
+          name: type.type.name,
+          spanishName: await getSpanishType(type.type.url)
+        }))
+      );
+
+      setPokemon({
         id: response.data.id,
-        name: response.data.name,
-        types: response.data.types.map(type => type.type.name),
+        name: spanishName,
+        types,
         stats: response.data.stats.map(stat => ({
           name: stat.stat.name,
           value: stat.base_stat
         })),
-        moves: response.data.moves.map(move => ({
-          name: move.move.name,
-          level: move.version_group_details[0]?.level_learned_at || 1
-        })).sort((a, b) => a.level - b.level),
         image: response.data.sprites.other['official-artwork'].front_default,
-        height: response.data.height / 10,
-        weight: response.data.weight / 10,
         evolutions: getEvolutionDetails(evolutionResponse.data.chain),
-        allMoves: response.data.moves  // Add this line to include all moves data
-      };
-      setPokemon(pokemon);
+        allMoves: response.data.moves
+      });
+
+      const movesData = await getGenerationMoves(response.data.moves, selectedGeneration);
+      setMoves(movesData);
     } catch (err) {
-      setError('Pokemon not found');
+      setError('Pokémon no encontrado');
       setPokemon(null);
+      setMoves([]);
     }
   };
 
-  // Replace your existing moves section in the return statement with this:
+  // Fix the useEffect dependency warning
+  React.useEffect(() => {
+    if (pokemon?.allMoves) {
+      getGenerationMoves(pokemon.allMoves, selectedGeneration).then(setMoves);
+    }
+  }, [selectedGeneration, pokemon, getGenerationMoves]);
+
   return (
     <PokedexContainer>
       <h1 style={{ textAlign: 'center', color: '#333' }}>La Pokéñex de Ñalfred</h1>
@@ -283,9 +340,9 @@ const Pokedex = () => {
               searchPokemon();
             }
           }}
-          placeholder="Enter Pokemon name or number"
+          placeholder="Ingresa el nombre o número del Pokémon"
         />
-        <button onClick={searchPokemon}>Search</button>
+        <button onClick={searchPokemon}>Buscar</button>
       </SearchBar>
 
       {error && <p style={{ color: 'red' }}>{error}</p>}
@@ -302,7 +359,9 @@ const Pokedex = () => {
           <h3>Types:</h3>
           <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
             {pokemon.types.map(type => (
-              <TypeBadge key={type} type={type}>{type}</TypeBadge>
+              <TypeBadge key={type.name} type={type.name}>
+                {type.spanishName || type.name}
+              </TypeBadge>
             ))}
           </div>
 
@@ -335,45 +394,73 @@ const Pokedex = () => {
           </div>
 
           <MovesSection>
-            <h3>Moves:</h3>
+            <h3>Movimientos:</h3>
             <div style={{ display: 'flex', gap: '10px' }}>
               <GenerationSelect 
                 value={selectedGeneration}
                 onChange={(e) => setSelectedGeneration(e.target.value)}
               >
-                <option value="1">Generation I</option>
-                <option value="2">Generation II</option>
-                <option value="3">Generation III</option>
-                <option value="4">Generation IV</option>
-                <option value="5">Generation V</option>
-                <option value="6">Generation VI</option>
-                <option value="7">Generation VII</option>
-                <option value="8">Generation VIII</option>
+                <option value="1">Generación I</option>
+                <option value="2">Generación II</option>
+                <option value="3">Generación III</option>
+                <option value="4">Generación IV</option>
+                <option value="5">Generación V</option>
+                <option value="6">Generación VI</option>
+                <option value="7">Generación VII</option>
+                <option value="8">Generación VIII</option>
               </GenerationSelect>
 
               <FilterSelect
                 value={moveFilter}
                 onChange={(e) => setMoveFilter(e.target.value)}
               >
-                <option value="level-up">Level Up Only</option>
-                <option value="machine">TM/HM</option>
-                <option value="tutor">Move Tutor</option>
-                <option value="egg">Egg Moves</option>
-                <option value="all">All Methods</option>
+                <option value="level-up">Subida de nivel</option>
+                <option value="machine">MT/MO</option>
+                <option value="tutor">Tutor</option>
+                <option value="egg">Movimiento Huevo</option>
+                <option value="all">Todos los métodos</option>
               </FilterSelect>
             </div>
 
             <MovesList>
-              {getGenerationMoves(pokemon.allMoves, selectedGeneration).map(move => (
+              {moves.map(move => (
                 <MoveCard key={move.name}>
                   <div style={{ fontWeight: 'bold', textTransform: 'capitalize' }}>
-                    {move.name.replace('-', ' ')}
+                    {move.spanishName || move.name.replace('-', ' ')}
                   </div>
-                  <div style={{ fontSize: '14px', color: '#666' }}>
+                  <div style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
                     {move.method === 'level-up' 
-                      ? `Learn at Level ${move.level}` 
-                      : `Learn by ${move.method.replace('-', ' ')}`}
+                      ? `Nivel ${move.level}` 
+                      : move.method === 'machine' 
+                        ? 'MT/MO'
+                        : move.method === 'tutor'
+                          ? 'Tutor de Movimientos'
+                          : move.method === 'egg'
+                            ? 'Movimiento Huevo'
+                            : 'Otro método'}
                   </div>
+                  {move.type && (
+                    <div style={{ 
+                      display: 'inline-block', 
+                      padding: '2px 6px', 
+                      borderRadius: '4px', 
+                      fontSize: '11px', 
+                      color: 'white', 
+                      backgroundColor: getTypeColor(move.type),
+                      marginBottom: '5px'
+                    }}>
+                      {move.type}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '12px', marginTop: '3px' }}>
+                    {move.power !== null && `Potencia: ${move.power} | `}
+                    {move.accuracy !== null && `Precisión: ${move.accuracy}%`}
+                  </div>
+                  {move.description && (
+                    <div style={{ fontSize: '12px', fontStyle: 'italic', marginTop: '5px' }}>
+                      {move.description}
+                    </div>
+                  )}
                 </MoveCard>
               ))}
             </MovesList>
