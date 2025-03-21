@@ -278,9 +278,29 @@ const Pokedex = () => {
   const searchPokemon = async () => {
     try {
       setError('');
-      const response = await axios.get(`https://pokeapi.co/api/v2/pokemon/${search.toLowerCase()}`);
-      const speciesResponse = await axios.get(response.data.species.url);
-      const evolutionResponse = await axios.get(speciesResponse.data.evolution_chain.url);
+      // Añadir manejo de errores más detallado
+      console.log(`Buscando Pokémon: ${search.toLowerCase()}`);
+      
+      // Usar https explícitamente y añadir manejo de errores
+      const response = await axios.get(`https://pokeapi.co/api/v2/pokemon/${search.toLowerCase()}`)
+        .catch(error => {
+          console.error("Error en la búsqueda del Pokémon:", error);
+          throw new Error(`No se pudo encontrar el Pokémon: ${error.message}`);
+        });
+      
+      console.log("Datos del Pokémon recibidos:", response.data.name);
+      
+      const speciesResponse = await axios.get(response.data.species.url)
+        .catch(error => {
+          console.error("Error al obtener datos de especie:", error);
+          throw new Error(`No se pudieron obtener datos de especie: ${error.message}`);
+        });
+      
+      const evolutionResponse = await axios.get(speciesResponse.data.evolution_chain.url)
+        .catch(error => {
+          console.error("Error al obtener cadena evolutiva:", error);
+          throw new Error(`No se pudo obtener la cadena evolutiva: ${error.message}`);
+        });
       
       const spanishName = speciesResponse.data.names.find(
         name => name.language.name === 'es'
